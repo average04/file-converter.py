@@ -1,0 +1,5 @@
+flask>=3.0.0
+pywebview>=5.0
+pymobiledevice3>=4.0.0
+zeroconf>=0.131.0
+pyinstaller>=6.0.0

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>Back Up iPhone</h2>
+
+  <div class="form-group">
+    <label>Destination Folder</label>
+    <div style="display:flex; gap:8px">
+      <input type="text" id="dest-path" placeholder="Loading…">
+      <button class="btn btn-secondary" onclick="pickFolder()">Browse</button>
+    </div>
+  </div>
+
+  <div id="progress-section" style="display:none">
+    <div class="progress-wrap">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="progress-status">Starting…</span>
+        <span id="progress-pct">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="result-msg" style="display:none" class="alert"></div>
+
+  <div style="display:flex; gap:10px; margin-top:4px">
+    <button class="btn btn-primary"   id="btn-start"  onclick="startBackup()">▶ Start Backup</button>
+    <button class="btn btn-danger"    id="btn-cancel" onclick="cancelBackup()" style="display:none">✕ Cancel</button>
+    <a      class="btn btn-secondary" href="/">← Back</a>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let evtSource = null;
+
+  fetch("/api/settings").then(r => r.json()).then(s => {
+    document.getElementById("dest-path").value = s.backup_path;
+  });
+
+  function pickFolder() {
+    const current = document.getElementById("dest-path").value;
+    const path = prompt("Enter backup folder path:", current);
+    if (path) document.getElementById("dest-path").value = path;
+  }
+
+  function setResult(msg, isError) {
+    const el = document.getElementById("result-msg");
+    el.textContent  = msg;
+    el.className    = "alert " + (isError ? "alert-error" : "alert-success");
+    el.style.display = "block";
+  }
+
+  function resetControls() {
+    document.getElementById("btn-start").disabled    = false;
+    document.getElementById("btn-cancel").style.display = "none";
+    if (evtSource) { evtSource.close(); evtSource = null; }
+  }
+
+  function startBackup() {
+    const path = document.getElementById("dest-path").value.trim();
+    document.getElementById("btn-start").disabled       = true;
+    document.getElementById("btn-cancel").style.display = "inline-flex";
+    document.getElementById("progress-section").style.display = "block";
+    document.getElementById("result-msg").style.display = "none";
+    document.getElementById("progress-fill").style.width = "0%";
+    document.getElementById("progress-pct").textContent  = "0%";
+    document.getElementById("progress-status").textContent = "Starting…";
+
+    evtSource = new EventSource("/api/backup/stream");
+    evtSource.onmessage = e => {
+      const data = JSON.parse(e.data);
+      document.getElementById("progress-fill").style.width = data.percent + "%";
+      document.getElementById("progress-pct").textContent  = data.percent + "%";
+
+      if (data.status === "complete") {
+        document.getElementById("progress-status").textContent = "Done!";
+        setResult("✓ Backup saved to " + data.entry.path, false);
+        resetControls();
+      } else if (data.status === "error") {
+        document.getElementById("progress-status").textContent = "Error";
+        setResult("✕ " + data.message, true);
+        resetControls();
+      } else if (data.status === "cancelled") {
+        document.getElementById("progress-status").textContent = "Cancelled";
+        setResult("Backup was cancelled.", true);
+        resetControls();
+      } else {
+        document.getElementById("progress-status").textContent = "Backing up…";
+      }
+    };
+
+    fetch("/api/backup/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    }).then(r => r.json()).then(data => {
+      if (data.error) {
+        setResult("✕ " + data.error, true);
+        resetControls();
+      }
+    });
+  }
+
+  function cancelBackup() {
+    fetch("/api/backup/cancel", { method: "POST" });
+  }
+</script>
+{% endblock %}

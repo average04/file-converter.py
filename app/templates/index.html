@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card" id="device-card">
+  <div class="empty-state" id="no-device">
+    <div class="icon">📱</div>
+    <h2>No iPhone Connected</h2>
+    <p>Connect your iPhone via USB cable,<br>or enable <strong>Sync over Wi-Fi</strong> in iTunes/Finder.</p>
+  </div>
+
+  <div id="device-info" style="display:none">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:18px">
+      <div>
+        <div class="device-name" id="device-name"></div>
+        <div class="device-meta" id="device-meta"></div>
+      </div>
+      <span class="badge" id="connection-badge"></span>
+    </div>
+    <div class="storage-bar"><div class="storage-fill" id="storage-fill" style="width:0%"></div></div>
+    <div class="storage-label" id="storage-label"></div>
+  </div>
+</div>
+
+<div class="card" id="action-card" style="display:none">
+  <h3>Start Backup</h3>
+  <p style="font-size:0.88rem; color:#777; margin-bottom:16px">
+    Destination: <span id="backup-dest" style="color:#333; font-weight:500"></span>
+  </p>
+  <div style="display:flex; gap:10px">
+    <a href="/backup" class="btn btn-primary">▶ Back Up Now</a>
+    <button class="btn btn-secondary" onclick="changeFolder()">Change Folder</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function fmtBytes(b) {
+    if (!b) return "—";
+    return (b / 1e9).toFixed(1) + " GB";
+  }
+
+  function updateUI(device) {
+    const noDevice   = document.getElementById("no-device");
+    const deviceInfo = document.getElementById("device-info");
+    const actionCard = document.getElementById("action-card");
+
+    if (!device) {
+      noDevice.style.display   = "block";
+      deviceInfo.style.display = "none";
+      actionCard.style.display = "none";
+      return;
+    }
+
+    noDevice.style.display   = "none";
+    deviceInfo.style.display = "block";
+    actionCard.style.display = "block";
+
+    document.getElementById("device-name").textContent = device.name;
+    document.getElementById("device-meta").textContent =
+      device.model + "  •  iOS " + device.ios_version;
+
+    const badge = document.getElementById("connection-badge");
+    badge.textContent  = device.connection;
+    badge.className    = "badge badge-" + device.connection.toLowerCase();
+
+    const total = device.storage?.TotalDataCapacity || 0;
+    const avail = device.storage?.TotalDataAvailable || 0;
+    const used  = total - avail;
+    const pct   = total ? Math.round(used / total * 100) : 0;
+    document.getElementById("storage-fill").style.width = pct + "%";
+    document.getElementById("storage-label").textContent =
+      fmtBytes(used) + " used of " + fmtBytes(total);
+  }
+
+  function changeFolder() {
+    fetch("/api/settings").then(r => r.json()).then(s => {
+      const path = prompt("Enter backup folder path:", s.backup_path);
+      if (path) {
+        fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ backup_path: path }),
+        });
+        document.getElementById("backup-dest").textContent = path;
+      }
+    });
+  }
+
+  fetch("/api/settings").then(r => r.json()).then(s => {
+    document.getElementById("backup-dest").textContent = s.backup_path;
+  });
+
+  const es = new EventSource("/api/device/stream");
+  es.onmessage = e => updateUI(JSON.parse(e.data));
+</script>
+{% endblock %}

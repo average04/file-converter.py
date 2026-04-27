@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>Backup History</h2>
+
+  <div class="empty-state" id="empty" style="display:none">
+    <div class="icon">🗂️</div>
+    <h2>No backups yet</h2>
+    <p>Your completed backups will appear here.</p>
+  </div>
+
+  <table id="history-table" style="display:none">
+    <thead>
+      <tr>
+        <th>Device</th>
+        <th>Date</th>
+        <th>Size</th>
+        <th>Location</th>
+      </tr>
+    </thead>
+    <tbody id="history-body"></tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function fmtSize(bytes) {
+    if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + " GB";
+    if (bytes >= 1e6) return (bytes / 1e6).toFixed(0) + " MB";
+    return (bytes / 1e3).toFixed(0) + " KB";
+  }
+
+  fetch("/api/backup/history").then(r => r.json()).then(history => {
+    if (!history.length) {
+      document.getElementById("empty").style.display = "block";
+      return;
+    }
+    const tbody = document.getElementById("history-body");
+    document.getElementById("history-table").style.display = "table";
+    history.slice().reverse().forEach(entry => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${entry.device}</td>
+        <td>${new Date(entry.date).toLocaleString()}</td>
+        <td>${fmtSize(entry.size)}</td>
+        <td style="color:#aaa; font-size:0.8rem; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
+            title="${entry.path}">${entry.path}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  });
+</script>
+{% endblock %}
