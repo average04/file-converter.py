@@ -1,39 +1,34 @@
 from flask import Flask
-from app.services.settings_manager import SettingsManager
-from app.services.device_detector import DeviceDetector
-from app.services.backup_service import BackupService
 from pathlib import Path
 
-_settings = SettingsManager()
-_detector = DeviceDetector()
-_backup = BackupService(
-    backup_dir=Path(_settings.get("backup_path")),
-)
+_window = None
+_output_dir: Path = Path.home() / "Documents" / "FileConverter"
 
 
-def get_settings() -> SettingsManager:
-    return _settings
+def set_window(window) -> None:
+    global _window
+    _window = window
 
 
-def get_detector() -> DeviceDetector:
-    return _detector
+def get_window():
+    return _window
 
 
-def get_backup() -> BackupService:
-    return _backup
+def get_output_dir() -> Path:
+    return _output_dir
+
+
+def set_output_dir(path: str) -> None:
+    global _output_dir
+    _output_dir = Path(path)
+    _output_dir.mkdir(parents=True, exist_ok=True)
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB limit
 
-    _detector.start()
-
-    from app.routes.settings import bp as settings_bp
-    from app.routes.device import bp as device_bp
-    from app.routes.backup import bp as backup_bp
-
-    app.register_blueprint(settings_bp)
-    app.register_blueprint(device_bp)
-    app.register_blueprint(backup_bp)
+    from app.routes.converter import bp
+    app.register_blueprint(bp)
 
     return app

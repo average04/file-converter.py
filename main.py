@@ -40,13 +40,17 @@ def main() -> None:
     # Give Flask a moment to start before opening the window
     time.sleep(1)
 
-    webview.create_window(
-        title="iPhone Backup",
+    window = webview.create_window(
+        title="File Converter",
         url=URL,
         width=960,
         height=700,
         min_size=(800, 600),
     )
+
+    from app import set_window
+    set_window(window)
+
     webview.start()
 
     lock.close()

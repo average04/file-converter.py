@@ -1,34 +1,56 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="card" id="device-card">
-  <div class="empty-state" id="no-device">
-    <div class="icon">📱</div>
-    <h2>No iPhone Connected</h2>
-    <p>Connect your iPhone via USB cable,<br>or enable <strong>Sync over Wi-Fi</strong> in iTunes/Finder.</p>
+<div class="converter-wrap">
+  <h1>Convert your file</h1>
+  <p class="subtitle">PDF to Word &nbsp;·&nbsp; Word to PDF</p>
+
+  <!-- Mode selector -->
+  <div class="mode-selector">
+    <button class="mode-btn active" data-mode="pdf_to_docx" onclick="setMode('pdf_to_docx', this)">
+      PDF → Word
+    </button>
+    <button class="mode-btn" data-mode="docx_to_pdf" onclick="setMode('docx_to_pdf', this)">
+      Word → PDF
+    </button>
   </div>
 
-  <div id="device-info" style="display:none">
-    <div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:18px">
-      <div>
-        <div class="device-name" id="device-name"></div>
-        <div class="device-meta" id="device-meta"></div>
-      </div>
-      <span class="badge" id="connection-badge"></span>
-    </div>
-    <div class="storage-bar"><div class="storage-fill" id="storage-fill" style="width:0%"></div></div>
-    <div class="storage-label" id="storage-label"></div>
+  <!-- Output folder -->
+  <div class="folder-row">
+    <div class="folder-label">Save to:</div>
+    <div class="folder-path" id="folder-path">Loading…</div>
+    <button class="btn btn-secondary btn-sm" onclick="pickFolder()">Change</button>
   </div>
-</div>
 
-<div class="card" id="action-card" style="display:none">
-  <h3>Start Backup</h3>
-  <p style="font-size:0.88rem; color:#777; margin-bottom:16px">
-    Destination: <span id="backup-dest" style="color:#333; font-weight:500"></span>
-  </p>
-  <div style="display:flex; gap:10px">
-    <a href="/backup" class="btn btn-primary">▶ Back Up Now</a>
-    <button class="btn btn-secondary" onclick="changeFolder()">Change Folder</button>
+  <!-- Drop zone -->
+  <div class="drop-zone" id="drop-zone"
+       ondragover="onDragOver(event)"
+       ondragleave="onDragLeave(event)"
+       ondrop="onDrop(event)"
+       onclick="document.getElementById('file-input').click()">
+    <div class="drop-icon" id="drop-icon">📄</div>
+    <p class="drop-text" id="drop-text">Drag & drop your file here</p>
+    <p class="drop-hint" id="drop-hint">or click to browse</p>
+    <input type="file" id="file-input" style="display:none" onchange="onFileSelected(this)">
+  </div>
+
+  <!-- Error message -->
+  <div class="alert alert-error" id="error-msg" style="display:none"></div>
+
+  <!-- Success message -->
+  <div class="alert alert-success" id="success-msg" style="display:none">
+    ✅ <strong>Success!</strong> File saved to "<span id="success-path"></span>"
+  </div>
+
+  <!-- Convert button -->
+  <button class="btn btn-primary btn-convert" id="btn-convert" onclick="convert()" disabled>
+    Convert
+  </button>
+
+  <!-- Loading state -->
+  <div class="loading" id="loading" style="display:none">
+    <div class="spinner"></div>
+    <span>Converting…</span>
   </div>
 </div>
 
@@ -36,63 +58,115 @@
 
 {% block scripts %}
 <script>
-  function fmtBytes(b) {
-    if (!b) return "—";
-    return (b / 1e9).toFixed(1) + " GB";
-  }
+  let selectedFile = null;
+  let currentMode  = "pdf_to_docx";
 
-  function updateUI(device) {
-    const noDevice   = document.getElementById("no-device");
-    const deviceInfo = document.getElementById("device-info");
-    const actionCard = document.getElementById("action-card");
-
-    if (!device) {
-      noDevice.style.display   = "block";
-      deviceInfo.style.display = "none";
-      actionCard.style.display = "none";
-      return;
-    }
-
-    noDevice.style.display   = "none";
-    deviceInfo.style.display = "block";
-    actionCard.style.display = "block";
-
-    document.getElementById("device-name").textContent = device.name;
-    document.getElementById("device-meta").textContent =
-      device.model + "  •  iOS " + device.ios_version;
-
-    const badge = document.getElementById("connection-badge");
-    badge.textContent  = device.connection;
-    badge.className    = "badge badge-" + device.connection.toLowerCase();
-
-    const total = device.storage?.TotalDataCapacity || 0;
-    const avail = device.storage?.TotalDataAvailable || 0;
-    const used  = total - avail;
-    const pct   = total ? Math.round(used / total * 100) : 0;
-    document.getElementById("storage-fill").style.width = pct + "%";
-    document.getElementById("storage-label").textContent =
-      fmtBytes(used) + " used of " + fmtBytes(total);
-  }
-
-  function changeFolder() {
-    fetch("/api/settings").then(r => r.json()).then(s => {
-      const path = prompt("Enter backup folder path:", s.backup_path);
-      if (path) {
-        fetch("/api/settings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ backup_path: path }),
-        });
-        document.getElementById("backup-dest").textContent = path;
-      }
-    });
-  }
-
-  fetch("/api/settings").then(r => r.json()).then(s => {
-    document.getElementById("backup-dest").textContent = s.backup_path;
+  // Load current output folder on startup
+  fetch("/api/output-dir").then(r => r.json()).then(d => {
+    document.getElementById("folder-path").textContent = d.path;
   });
 
-  const es = new EventSource("/api/device/stream");
-  es.onmessage = e => updateUI(JSON.parse(e.data));
+  async function pickFolder() {
+    const resp = await fetch("/pick-folder", { method: "POST" });
+    const data = await resp.json();
+    if (data.path) {
+      document.getElementById("folder-path").textContent = data.path;
+    }
+  }
+
+  const accept = {
+    pdf_to_docx: ".pdf",
+    docx_to_pdf: ".docx,.doc",
+  };
+
+  function setMode(mode, btn) {
+    currentMode = mode;
+    document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("file-input").accept = accept[mode];
+    clearFile();
+  }
+
+  function clearFile() {
+    selectedFile = null;
+    document.getElementById("drop-icon").textContent = "📄";
+    document.getElementById("drop-text").textContent  = "Drag & drop your file here";
+    document.getElementById("drop-hint").textContent  = "or click to browse";
+    document.getElementById("btn-convert").disabled = true;
+    document.getElementById("error-msg").style.display = "none";
+    document.getElementById("file-input").value = "";
+  }
+
+  function setFile(file) {
+    selectedFile = file;
+    document.getElementById("drop-icon").textContent = "✅";
+    document.getElementById("drop-text").textContent  = file.name;
+    document.getElementById("drop-hint").textContent  = (file.size / 1024 / 1024).toFixed(2) + " MB";
+    document.getElementById("btn-convert").disabled = false;
+    document.getElementById("error-msg").style.display = "none";
+  }
+
+  function onFileSelected(input) {
+    if (input.files[0]) setFile(input.files[0]);
+  }
+
+  function onDragOver(e) {
+    e.preventDefault();
+    document.getElementById("drop-zone").classList.add("drag-over");
+  }
+
+  function onDragLeave(e) {
+    document.getElementById("drop-zone").classList.remove("drag-over");
+  }
+
+  function onDrop(e) {
+    e.preventDefault();
+    document.getElementById("drop-zone").classList.remove("drag-over");
+    const file = e.dataTransfer.files[0];
+    if (file) setFile(file);
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("error-msg");
+    el.textContent = msg;
+    el.style.display = "block";
+  }
+
+  async function convert() {
+    if (!selectedFile) return;
+
+    document.getElementById("btn-convert").style.display = "none";
+    document.getElementById("loading").style.display     = "flex";
+    document.getElementById("error-msg").style.display   = "none";
+    document.getElementById("success-msg").style.display = "none";
+
+    const form = new FormData();
+    form.append("file", selectedFile);
+    form.append("mode", currentMode);
+
+    try {
+      const resp = await fetch("/convert", { method: "POST", body: form });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        showError(data.error || "Conversion failed");
+        return;
+      }
+
+      document.getElementById("success-path").textContent = data.path;
+      document.getElementById("success-msg").style.display = "block";
+      document.getElementById("folder-path").textContent = data.folder;
+      clearFile(); // resets drop zone but success-msg stays visible
+    } catch (err) {
+      showError("Something went wrong. Please try again.");
+    } finally {
+      document.getElementById("btn-convert").style.display = "block";
+      document.getElementById("loading").style.display     = "none";
+    }
+  }
+
+  function openFolder() {
+    fetch("/open-folder", { method: "POST" });
+  }
 </script>
 {% endblock %}
